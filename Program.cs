@@ -498,12 +498,13 @@ namespace WfcPatcher
                 // Only replace proper URLs
                 //if (!Uri.IsWellFormedUriString(originalString, UriKind.Absolute))
                 //    continue;
-                if (originalString == "https://")
-                    continue;
 
                 string replacedString = originalString
                     .Replace("nintendowifi.net", "wifi.wfc.kthx.at")
+                    .Replace("nintendowifi.com", "wifi.wfc.kthx.at")
                     .Replace("Nintendo Wi-Fi", "DreamWFC");
+                if (replacedString == originalString)
+                    continue;
 #if DEBUG
                 Console.WriteLine("=> String: {0}", replacedString);
 #endif

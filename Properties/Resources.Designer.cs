@@ -63,16 +63,6 @@ namespace WfcPatcher.Properties {
         /// <summary>
         ///   Sucht eine lokalisierte Ressource vom Typ System.Byte[].
         /// </summary>
-        internal static byte[] original_nas {
-            get {
-                object obj = ResourceManager.GetObject("original_nas", resourceCulture);
-                return ((byte[])(obj));
-            }
-        }
-        
-        /// <summary>
-        ///   Sucht eine lokalisierte Ressource vom Typ System.Byte[].
-        /// </summary>
         internal static byte[] patched_nas {
             get {
                 object obj = ResourceManager.GetObject("patched_nas", resourceCulture);
