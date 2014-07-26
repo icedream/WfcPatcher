@@ -527,10 +527,10 @@ namespace WfcPatcher
                 // the chance of the recompressed binary becoming smaller than the original one. We want it to remain the
                 // exact same size. Now, of course, this is not always going to happen, but this should improve the chance
                 // significantly.
-                /*if (writeAdditionalBytePostString)
+                if (writeAdditionalBytePostString && result + replacedStringBytes.Length < result + originalString.Length)
                 {
-                    data[result + replacedStringBytes.Length - 1] = 0x00;
-                }*/
+                    data[result + originalString.Length] = 0x7f;
+                }
             }
 
             return replacedData;
