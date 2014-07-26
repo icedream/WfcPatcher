@@ -1,7 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.Remoting.Messaging;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -408,6 +411,9 @@ namespace WfcPatcher
             foreach (var certResult in certResults)
             {
                 var info = Util.GetTextAscii(data, certResult);
+#if DEBUG
+                Console.WriteLine("Found certificate: {0}", info);
+#endif
 
                 // We only want to replace the NoA certificate, nothing else here
                 if (info != "US, Washington, Nintendo of America Inc, NOA, Nintendo CA, ca@noa.nintendo.com")
@@ -441,6 +447,18 @@ namespace WfcPatcher
                 }
 
                 var parameters = key.ExportParameters(false);
+#if DEBUG
+                HexDisplay(data, certResult, originalInfoLength + 2 + 148, "OLD cert data", p =>
+                {
+                    if (p < originalInfoLength)
+                        return ConsoleColor.Blue;
+                    if (p >= originalInfoLength + 2 && p < originalInfoLength + 2 + parameters.Modulus.Length)
+                        return ConsoleColor.Green;
+                    if (p >= originalInfoLength + 2 + parameters.Modulus.Length && p < originalInfoLength + 2 + parameters.Modulus.Length + parameters.Exponent.Length)
+                        return ConsoleColor.Red;
+                    return ConsoleColor.DarkGray;
+                });
+#endif
                 parameters.Modulus.CopyTo(data, pos);
                 parameters.Exponent.CopyTo(data, pos += parameters.Modulus.Length);
 
@@ -467,73 +485,203 @@ namespace WfcPatcher
                     Console.Error.WriteLine("WARNING: New certificate subject is longer than original one, trimming!");
                     info = info.Substring(0, originalInfoLength);
                 }
-                Console.WriteLine(info);
-                Encoding.ASCII.GetBytes(info + new string('\x00', originalInfoLength - info.Length))
+                Encoding.ASCII.GetBytes(info + "\x00" + new string('\x00', originalInfoLength - info.Length))
                     .CopyTo(data, certResult);
 
                 // TODO: Patch SSL certificate metadata
                 //Console.WriteLine(BitConverter.ToString(data, pos += parameters.Exponent.Length, 20));
 
-                replacedData = true;
-            }
-
-            // Replace URLs
-
-            var results = data.Locate(Encoding.ASCII.GetBytes("nintendowifi"))
-                .Concat(data.Locate(Encoding.ASCII.GetBytes("Nintendo Wi-Fi")));
-
-            foreach (var oresult in results)
-            {
-                var result = oresult;
-                while (char.IsLetter((char) data[result]) || char.IsNumber((char) data[result]) ||
-                       char.IsDigit((char) data[result]) || char.IsPunctuation((char) data[result]) ||
-                       char.IsSymbol((char) data[result]) || char.IsWhiteSpace((char) data[result]))
-                {
-                    result--;
-                }
-                result++; // actual beginning, not zero
-
-                string originalString = Util.GetTextAscii(data, result);
-
-                // Only replace proper URLs
-                //if (!Uri.IsWellFormedUriString(originalString, UriKind.Absolute))
-                //    continue;
-
-                string replacedString = originalString
-                    .Replace("nintendowifi.net", "wifi.wfc.kthx.at")
-                    .Replace("nintendowifi.com", "wifi.wfc.kthx.at")
-                    .Replace("Nintendo Wi-Fi", "DreamWFC");
-                if (replacedString == originalString)
-                    continue;
 #if DEBUG
-                Console.WriteLine("=> String: {0}", replacedString);
+                HexDisplay(data, certResult, originalInfoLength + 2 + 148, "NEW cert data", p =>
+                    {
+                        if (p < originalInfoLength)
+                            return ConsoleColor.Blue;
+                        if (p >= originalInfoLength + 2 && p < originalInfoLength + 2 + parameters.Modulus.Length)
+                            return ConsoleColor.Green;
+                        if (p >= originalInfoLength + 2 + parameters.Modulus.Length && p < originalInfoLength + 2 + parameters.Modulus.Length + parameters.Exponent.Length)
+                            return ConsoleColor.Red;
+                        return ConsoleColor.DarkGray;
+                    });
 #endif
-                var requiredPadding = originalString.Length - replacedString.Length;
-                if (requiredPadding > 0)
-                {
-                    Console.Error.WriteLine("WARNING: Applying string padding ({0} bytes)", requiredPadding);
-                }
-
-                byte[] replacedStringBytes = Encoding.ASCII.GetBytes(replacedString + new String((char)paddingByte, requiredPadding));
 
                 replacedData = true;
-                replacedStringBytes.CopyTo(data, result);
-
-                // Alright, this might require some explaination.
-                // This is putting a byte in the location that previously held the NULL terminator at the end of the string.
-                // Thanks to "http" being one byte shorter than "https", the new NULL terminator was just placed in the
-                // padding loop above, and the byte below, at [result + i], is unused. Thus, we can just place anything in
-                // there without affecting the program. Now, the actual *reason* we're putting a byte in here is to reduce
-                // the chance of the recompressed binary becoming smaller than the original one. We want it to remain the
-                // exact same size. Now, of course, this is not always going to happen, but this should improve the chance
-                // significantly.
-                if (writeAdditionalBytePostString && result + replacedStringBytes.Length < result + originalString.Length)
-                {
-                    data[result + originalString.Length] = 0x7f;
-                }
             }
+
+            // Replace strings
+            replacedData = ReplaceString(data, new Dictionary<string, string>
+            {
+                // There must be a more intelligent way than that
+                { "call \u0031\u002D\u0038\u0030\u0030\u002D\u0038\u0039\u0035\u002D\u0031\u0036\u0037\u0032", "visit #dreamwfc on Rizon" },
+                { "call\n\u0031\u002D\u0038\u0030\u0030\u002D\u0038\u0039\u0035\u002D\u0031\u0036\u0037\u0032", "visit #dreamwfc on Rizon" },
+                { "visit #dreamwfc on Rizon in the USA and Canada", "visit #dreamwfc on Rizon" },
+                { "visit #dreamwfc on Rizon\nin the USA and Canada, ", "visit #dreamwfc on Rizon,\n" },
+                { "visit #dreamwfc on Rizon in\nthe USA and Canada, ", "visit #dreamwfc on Rizon,\n" },
+                { "visit #dreamwfc on Rizon in the\nUSA and Canada, ", "visit #dreamwfc on Rizon,\n" },
+                { "visit #dreamwfc on Rizon in the USA\nand Canada, ", "visit #dreamwfc on Rizon,\n" },
+                { "visit #dreamwfc on Rizon in the USA and\nCanada, ", "visit #dreamwfc on Rizon,\n" },
+                { "visit #dreamwfc on Rizon in the USA and Canada,\n", "visit #dreamwfc on Rizon,\n" },
+                { "www.nintendowifi.com", "wfc.kthx.at" },
+                { "nintendowifi.net", "wifi.wfc.kthx.at" },
+                { "nintendowifi.com", "wfc.kthx.at" },
+                { "Nintendo Wi-Fi Connection", "the DreamWFC servers" },
+                { "Nintendo\nWi-Fi Connection", "the\nDreamWFC servers" },
+                { "Nintendo Wi-Fi\nConnection", "the DreamWFC\nservers" },
+                { "Nintendo WFC", "DreamWFC" },
+                { "Nintendo\nWFC", "DreamWFC" },
+                { "Nintendo Wi-Fi", "DreamWFC" },
+                { "Nintendo\nWi-Fi", "DreamWFC" },
+                { "DreamWFC data", "Wi-Fi data" },
+                { "DreamWFC ID", "Wi-Fi ID" },
+                { "Wi-Fi  user", "Wi-Fi user" },
+            });
 
             return replacedData;
+        }
+
+        private static bool ReplaceString(byte[] data, Dictionary<string, string> replacements)
+        {
+            bool replaced = false;
+
+            var encs = new[]
+            {
+                Encoding.UTF8,
+                Encoding.ASCII,
+                Encoding.Unicode
+            };
+
+            foreach (var enc in encs)
+            {
+                foreach (var oresult in replacements.Keys
+                    .Select(enc.GetBytes)
+                    .SelectMany(data.Locate)
+                    .Distinct())
+                {
+                    var result = oresult;
+
+                    // Seek to actual beginning of the string
+                    while (true)
+                    {
+                        var cs = new char[16];
+                        enc.GetChars(data, result, enc.GetMaxByteCount(1), cs, 0);
+                        var c = cs.First();
+                        if (!IsPrintable(c))
+                            break;
+                        result -= Equals(enc, Encoding.Unicode) ? 2 : 1;
+                    }
+                    result += Equals(enc, Encoding.Unicode) ? 2 : 1; // actual beginning of string
+
+                    // Decode string
+                    string originalString;
+                    if (Equals(enc, Encoding.UTF8))
+                        originalString = Util.GetTextUTF8(data, result);
+                    else if (Equals(enc, Encoding.Unicode))
+                        originalString = Util.GetTextUnicode(data, result, data.Length - result);
+                    else
+                        originalString = Util.GetTextAscii(data, result);
+
+                    // Do not replace strings which may be internal condition references
+                    if (originalString == "https://" || originalString == "http://")
+                        continue;
+
+                    // Produce a proper terminator later on
+                    originalString += '\0';
+
+                    var replacementString = replacements.Aggregate(originalString,
+                        (current, i) => current.Replace(i.Key, i.Value));
+
+                    // Did something change?
+                    if (replacementString == originalString)
+                        continue;
+
+                    var originalBytes = enc.GetBytes(originalString);
+
+#if DEBUG
+                    HexDisplay(data, result, originalBytes.Length, string.Format("OLD {0} string data", enc.EncodingName));
+#endif
+
+                    var replacementBytes = originalBytes;
+
+                    // Alright, this might require some explaination.
+                    // This is putting a byte in the location that previously held the NULL terminator at the end of the string.
+                    // We can just place anything in there without affecting the program. Now, the actual *reason* we're putting
+                    // a byte in here is to reduce the chance of the recompressed binary becoming smaller than the original one.
+                    // We want it to remain the exact same size. Now, of course, this is not always going to happen, but this
+                    // should improve the chance significantly.
+                    replacementBytes[originalBytes.Length - 1] = 0x7f;
+
+                    // Now we do the actual replacement
+                    enc.GetBytes(replacementString)
+                        .CopyTo(replacementBytes, 0);
+                    replacementBytes.CopyTo(data, result);
+
+                    replaced = true;
+
+#if DEBUG
+                    HexDisplay(data, result, originalBytes.Length, string.Format("NEW {0} string data", enc.EncodingName));
+#endif
+                }
+            }
+
+            return replaced;
+        }
+        
+#if DEBUG
+        private static void HexDisplay(IEnumerable<byte> data, int offset, int length, string comment = null, Func<int, ConsoleColor> colorCb = null)
+        {
+            if (colorCb == null)
+                colorCb = i => ConsoleColor.DarkGray;
+
+            var bytes = new Queue<byte>(data.Skip(offset).Take(length));
+
+            comment = string.Format("{2} at 0x{0:X8} ({1} bytes)", offset, length, comment ?? "Raw data");
+
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            
+            Console.WriteLine(comment);
+
+                var np = 0;
+            while (bytes.Any())
+            {
+                var rowBytes = new List<byte>();
+                for (var i = 0; i < 16; i++)
+                    if (bytes.Any())
+                        rowBytes.Add(bytes.Dequeue());
+
+                var rowChars = rowBytes
+                    .Select(b => (char) b)
+                    .Select(c => IsPrintable(c) ? c : '.');
+
+                Console.Write("\t");
+                var pad = 16 * 3;
+                foreach (var b in rowBytes)
+                {
+                    Console.ForegroundColor = colorCb(np);
+                    Console.Write("{0:X2} ", b);
+                    pad -= 3;
+                    np++;
+                }
+
+                Console.Write(new string(' ', pad));
+
+                np -= 16;
+                foreach (var c in rowChars)
+                {
+                    Console.ForegroundColor = colorCb(np);
+                    Console.Write(c);
+                    np++;
+                }
+
+                Console.WriteLine();
+            }
+
+            Console.ResetColor();
+        }
+#endif
+
+        private static bool IsPrintable(char c)
+        {
+            return !Char.IsControl(c)
+                   && c != (char) 0x2028 && c != (char) 0x2029; // see comment in http://stackoverflow.com/a/13499234
         }
     }
 }
