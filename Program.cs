@@ -1,10 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Runtime.Remoting.Messaging;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -25,68 +22,91 @@ namespace WfcPatcher
             {
 #if DEBUG
 #else
-				try {
+                try
+                {
 #endif
                 string newFilename = PatchFile(s);
                 Console.WriteLine("Patched to " + newFilename + "!");
 #if DEBUG
 #else
-				} catch ( Exception ex ) {
-					Console.WriteLine( "Failed patching " + s );
-					Console.WriteLine( ex.ToString() );
-					Console.WriteLine();
-				}
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("Failed patching " + s);
+                    Console.WriteLine(ex.ToString());
+                    Console.WriteLine();
+                }
 #endif
             }
         }
 
         private static string PatchFile(string filename)
         {
-            Console.WriteLine("Reading and copying " + filename + "...");
-            var ndsSrc = new FileStream(filename, FileMode.Open);
-            string newFilename =
-                Path.Combine(Path.GetDirectoryName(filename), Path.GetFileNameWithoutExtension(filename)) +
-                " (DreamWfc)" + Path.GetExtension(filename);
-            var nds = new FileStream(newFilename, FileMode.Create);
-            Util.CopyStream(ndsSrc, nds, (int) ndsSrc.Length);
-            ndsSrc.Close();
+            var fileInfo = new FileInfo(filename);
+            var newFilename = Path.Combine(fileInfo.Directory.FullName,
+                string.Format("{0} (DreamWfc).{1}", Path.GetFileNameWithoutExtension(fileInfo.Name),
+                    fileInfo.Extension));
 
-            // http://dsibrew.org/wiki/DSi_Cartridge_Header
+            using (var nds = new MemoryStream())
+            {
+                Console.WriteLine("Loading ROM file {0}...", fileInfo.FullName);
+                using (var ndsSrc = fileInfo.OpenRead())
+                {
+                    ndsSrc.CopyTo(nds);
+                }
 
-            // arm
-            Console.WriteLine("Patching ARM Executables...");
-            nds.Position = 0x20;
-            uint arm9offset = nds.ReadUInt32();
-            uint arm9entry = nds.ReadUInt32();
-            uint arm9load = nds.ReadUInt32();
-            uint arm9size = nds.ReadUInt32();
-            uint arm7offset = nds.ReadUInt32();
-            uint arm7entry = nds.ReadUInt32();
-            uint arm7load = nds.ReadUInt32();
-            uint arm7size = nds.ReadUInt32();
+                // A bit of info about how DS ROMs are structured: http://dsibrew.org/wiki/DSi_Cartridge_Header
 
-            PatchArm9(nds, arm9offset, arm9size);
-            PatchArm7(nds, arm7offset, arm7size);
+                /* ARM patching */
+                Console.WriteLine("Patching ARM Executables...");
 
-            // overlays
-            Console.WriteLine("Patching overlays...");
-            nds.Position = 0x50;
-            uint arm9overlayoff = nds.ReadUInt32();
-            uint arm9overlaylen = nds.ReadUInt32();
-            uint arm7overlayoff = nds.ReadUInt32();
-            uint arm7overlaylen = nds.ReadUInt32();
+                // Header
+                nds.Position = 0x20;
+                uint arm9offset = nds.ReadUInt32();
+                uint arm9entry = nds.ReadUInt32();
+                uint arm9load = nds.ReadUInt32();
+                uint arm9size = nds.ReadUInt32();
+                uint arm7offset = nds.ReadUInt32();
+                uint arm7entry = nds.ReadUInt32();
+                uint arm7load = nds.ReadUInt32();
+                uint arm7size = nds.ReadUInt32();
 
-            PatchOverlay(nds, arm9overlayoff, arm9overlaylen);
-            PatchOverlay(nds, arm7overlayoff, arm7overlaylen);
+                // Actual patching
+                PatchArm9(nds, arm9offset, arm9size);
+                PatchArm7(nds, arm7offset, arm7size);
 
-            Console.WriteLine();
+                /* Overlay patching */
+                Console.WriteLine("Patching ARM overlays...");
 
-            nds.Close();
+                // Header
+                nds.Position = 0x50;
+                uint arm9overlayoff = nds.ReadUInt32();
+                uint arm9overlaylen = nds.ReadUInt32();
+                uint arm7overlayoff = nds.ReadUInt32();
+                uint arm7overlaylen = nds.ReadUInt32();
+
+                // Actual patching
+                PatchOverlay(nds, arm9overlayoff, arm9overlaylen);
+                PatchOverlay(nds, arm7overlayoff, arm7overlaylen);
+
+                Console.WriteLine();
+
+                // Now save patched ROM to disk
+                Console.Write("Saving patched ROM to {0}...", newFilename);
+                using (var fs = File.Open(newFilename, FileMode.OpenOrCreate))
+                {
+                    nds.Position = 0;
+                    nds.CopyTo(fs);
+                    fs.Flush(true);
+                }
+            }
+
+            GC.Collect();
 
             return newFilename;
         }
 
-        private static void PatchArm9(FileStream nds, uint pos, uint len)
+        private static void PatchArm9(Stream nds, uint pos, uint len)
         {
             nds.Position = pos;
             var data = new byte[len];
@@ -111,13 +131,13 @@ namespace WfcPatcher
             Console.WriteLine("ARM9 old diff:     0x{0:X6}", additionalCompressedSize);
 #endif
 
-            var blz = new blz();
+            var blz = new Blz();
             // if this condition isn't true then it can't be blz-compressed so don't even try
             if (data.Length == compressedSize + 0x4000 || data.Length == compressedSize + 0x4004)
             {
                 try
                 {
-                    blz.arm9 = 1;
+                    blz.Arm9 = 1;
                     byte[] maybeDecData = blz.BLZ_Decode(data);
 
                     if (maybeDecData.Length == decompressedSize)
@@ -227,7 +247,7 @@ namespace WfcPatcher
             }
         }
 
-        private static void PatchArm7(FileStream nds, uint pos, uint len)
+        private static void PatchArm7(Stream nds, uint pos, uint len)
         {
             nds.Position = pos;
             var data = new byte[len];
@@ -241,7 +261,7 @@ namespace WfcPatcher
             }
         }
 
-        private static void PatchOverlay(FileStream nds, uint pos, uint len)
+        private static void PatchOverlay(Stream nds, uint pos, uint len)
         {
             // http://sourceforge.net/p/devkitpro/ndstool/ci/master/tree/source/ndsextract.cpp
             // http://sourceforge.net/p/devkitpro/ndstool/ci/master/tree/source/overlay.h
@@ -277,99 +297,97 @@ namespace WfcPatcher
                 var data = new byte[overlaySize];
                 nds.Read(data, 0, (int) overlaySize);
 
-                var blz = new blz();
-                byte[] decData;
+                var blz = new Blz();
 
                 bool compressed = (compressedBitmask & 0x01) == 0x01;
+                byte[] decData = compressed ? blz.BLZ_Decode(data) : data;
+
+
+                if (!ReplaceInData(decData))
+                    continue;
+
+                int newOverlaySize;
+                int diff;
+
+                // if something was replaced, put it back into the ROM
                 if (compressed)
                 {
-                    decData = blz.BLZ_Decode(data);
-                }
-                else
-                {
-                    decData = data;
-                }
+                    Console.WriteLine("Replacing and recompressing overlay " + id + "...");
 
-
-                if (ReplaceInData(decData))
-                {
-                    int newOverlaySize;
-                    int diff;
-
-                    // if something was replaced, put it back into the ROM
-                    if (compressed)
-                    {
-                        Console.WriteLine("Replacing and recompressing overlay " + id + "...");
-
-                        uint newCompressedSize = 0;
-                        data = blz.BLZ_Encode(decData, 0);
-                        newCompressedSize = (uint) data.Length;
-
-                        newOverlaySize = data.Length;
-                        diff = (int) overlaySize - newOverlaySize;
-
-                        if (diff < 0)
-                        {
-                            Console.WriteLine("Patched file is {0} bytes bigger than original, trying to remove debug strings...", Math.Abs(diff));
-                            var decNData = RemoveDebugStrings(decData);
-
-                            if (decNData.Length != decData.Length)
-                            {
-                                data = blz.BLZ_Encode(decData, 0);
-                                newCompressedSize = (uint) data.Length;
-
-                                newOverlaySize = data.Length;
-                                diff = (int)overlaySize - newOverlaySize;
-
-                                if (diff < 0)
-                                {
-                                    Console.Error.WriteLine("WARNING: Patched overlay is {0} bytes too big, this renders the ROM unplayable most probably.", Math.Abs(diff));
-                                }
-                                else
-                                {
-                                    Console.WriteLine("Recovery successful.");
-                                }
-                            }
-                            else
-                            {
-                                Console.Error.WriteLine("WARNING: Patched overlay is {0} bytes too big and debug string removal not possible, this renders the ROM unplayable most probably.", Math.Abs(diff));
-                            }
-                        }
-
-                        // replace compressed size, if it was used before
-                        if (compressedSize == overlaySize)
-                        {
-                            byte[] newCompressedSizeBytes = BitConverter.GetBytes(newCompressedSize);
-                            nds.Position = pos + i + 0x1C;
-                            nds.Write(newCompressedSizeBytes, 0, 3);
-                        }
-                    }
-                    else
-                    {
-                        Console.WriteLine("Replacing overlay " + id + "...");
-
-                        data = decData;
-                    }
+                    uint newCompressedSize = 0;
+                    data = blz.BLZ_Encode(decData, 0);
+                    newCompressedSize = (uint) data.Length;
 
                     newOverlaySize = data.Length;
                     diff = (int) overlaySize - newOverlaySize;
 
-                    nds.Position = overlayPositionStart;
-                    nds.Write(data, 0, data.Length);
-
-                    overlayPositionEnd = (uint) nds.Position;
-
-                    // padding
-                    for (int j = 0; j < diff; ++j)
+                    if (diff < 0)
                     {
-                        nds.WriteByte(0xFF);
+                        Console.WriteLine(
+                            "Patched file is {0} bytes bigger than original, trying to remove debug strings...",
+                            Math.Abs(diff));
+                        var decNData = RemoveDebugStrings(decData);
+
+                        if (decNData.Length != decData.Length)
+                        {
+                            data = blz.BLZ_Encode(decData, 0);
+                            newCompressedSize = (uint) data.Length;
+
+                            newOverlaySize = data.Length;
+                            diff = (int) overlaySize - newOverlaySize;
+
+                            if (diff < 0)
+                            {
+                                Console.Error.WriteLine(
+                                    "WARNING: Patched overlay is {0} bytes too big, this renders the ROM unplayable most probably.",
+                                    Math.Abs(diff));
+                            }
+                            else
+                            {
+                                Console.WriteLine("Recovery successful.");
+                            }
+                        }
+                        else
+                        {
+                            Console.Error.WriteLine(
+                                "WARNING: Patched overlay is {0} bytes too big and debug string removal not possible, this renders the ROM unplayable most probably.",
+                                Math.Abs(diff));
+                        }
                     }
 
-                    // new file end offset
-                    byte[] newPosEndData = BitConverter.GetBytes(overlayPositionEnd);
-                    nds.Position = fatOffset + 8*id + 4;
-                    nds.Write(newPosEndData, 0, 4);
+                    // replace compressed size, if it was used before
+                    if (compressedSize == overlaySize)
+                    {
+                        var newCompressedSizeBytes = BitConverter.GetBytes(newCompressedSize);
+                        nds.Position = pos + i + 0x1C;
+                        nds.Write(newCompressedSizeBytes, 0, 3);
+                    }
                 }
+                else
+                {
+                    Console.WriteLine("Replacing overlay " + id + "...");
+
+                    data = decData;
+                }
+
+                newOverlaySize = data.Length;
+                diff = (int) overlaySize - newOverlaySize;
+
+                nds.Position = overlayPositionStart;
+                nds.Write(data, 0, data.Length);
+
+                overlayPositionEnd = (uint) nds.Position;
+
+                // padding
+                for (var j = 0; j < diff; ++j)
+                {
+                    nds.WriteByte(0xFF);
+                }
+
+                // new file end offset
+                byte[] newPosEndData = BitConverter.GetBytes(overlayPositionEnd);
+                nds.Position = fatOffset + 8*id + 4;
+                nds.Write(newPosEndData, 0, 4);
             }
         }
 
@@ -384,12 +402,12 @@ namespace WfcPatcher
 
             foreach (var s in debugStrings)
             {
-                byte[] searchBytes = Encoding.ASCII.GetBytes(s);
+                var searchBytes = Encoding.ASCII.GetBytes(s);
                 var results = data.Locate(searchBytes);
 
                 foreach (var result in results)
                 {
-                    for (int i = 0; i < searchBytes.Length; ++i)
+                    for (var i = 0; i < searchBytes.Length; ++i)
                     {
                         data[result + i] = 0x20;
                     }
@@ -453,7 +471,8 @@ namespace WfcPatcher
                         return ConsoleColor.Blue;
                     if (p >= originalInfoLength + 2 && p < originalInfoLength + 2 + parameters.Modulus.Length)
                         return ConsoleColor.Green;
-                    if (p >= originalInfoLength + 2 + parameters.Modulus.Length && p < originalInfoLength + 2 + parameters.Modulus.Length + parameters.Exponent.Length)
+                    if (p >= originalInfoLength + 2 + parameters.Modulus.Length &&
+                        p < originalInfoLength + 2 + parameters.Modulus.Length + parameters.Exponent.Length)
                         return ConsoleColor.Red;
                     return ConsoleColor.DarkGray;
                 });
@@ -492,15 +511,16 @@ namespace WfcPatcher
 
 #if DEBUG
                 HexDisplay(data, certResult, originalInfoLength + 2 + 148, "NEW cert data", p =>
-                    {
-                        if (p < originalInfoLength)
-                            return ConsoleColor.Blue;
-                        if (p >= originalInfoLength + 2 && p < originalInfoLength + 2 + parameters.Modulus.Length)
-                            return ConsoleColor.Green;
-                        if (p >= originalInfoLength + 2 + parameters.Modulus.Length && p < originalInfoLength + 2 + parameters.Modulus.Length + parameters.Exponent.Length)
-                            return ConsoleColor.Red;
-                        return ConsoleColor.DarkGray;
-                    });
+                {
+                    if (p < originalInfoLength)
+                        return ConsoleColor.Blue;
+                    if (p >= originalInfoLength + 2 && p < originalInfoLength + 2 + parameters.Modulus.Length)
+                        return ConsoleColor.Green;
+                    if (p >= originalInfoLength + 2 + parameters.Modulus.Length &&
+                        p < originalInfoLength + 2 + parameters.Modulus.Length + parameters.Exponent.Length)
+                        return ConsoleColor.Red;
+                    return ConsoleColor.DarkGray;
+                });
 #endif
 
                 replacedData = true;
@@ -642,7 +662,8 @@ namespace WfcPatcher
                     var originalBytes = enc.GetBytes(originalString);
 
 #if DEBUG
-                    HexDisplay(data, result, originalBytes.Length, string.Format("OLD {0} string data", enc.EncodingName));
+                    HexDisplay(data, result, originalBytes.Length,
+                        string.Format("OLD {0} string data", enc.EncodingName));
 #endif
 
                     var replacementBytes = originalBytes;
@@ -663,16 +684,18 @@ namespace WfcPatcher
                     replaced = true;
 
 #if DEBUG
-                    HexDisplay(data, result, originalBytes.Length, string.Format("NEW {0} string data", enc.EncodingName));
+                    HexDisplay(data, result, originalBytes.Length,
+                        string.Format("NEW {0} string data", enc.EncodingName));
 #endif
                 }
             }
 
             return replaced;
         }
-        
+
 #if DEBUG
-        private static void HexDisplay(IEnumerable<byte> data, int offset, int length, string comment = null, Func<int, ConsoleColor> colorCb = null)
+        private static void HexDisplay(IEnumerable<byte> data, int offset, int length, string comment = null,
+            Func<int, ConsoleColor> colorCb = null)
         {
             if (colorCb == null)
                 colorCb = i => ConsoleColor.DarkGray;
@@ -682,10 +705,10 @@ namespace WfcPatcher
             comment = string.Format("{2} at 0x{0:X8} ({1} bytes)", offset, length, comment ?? "Raw data");
 
             Console.ForegroundColor = ConsoleColor.DarkGray;
-            
+
             Console.WriteLine(comment);
 
-                var np = 0;
+            var np = 0;
             while (bytes.Any())
             {
                 var rowBytes = new List<byte>();
@@ -698,7 +721,7 @@ namespace WfcPatcher
                     .Select(c => IsPrintable(c) ? c : '.');
 
                 Console.Write("\t");
-                var pad = 16 * 3;
+                var pad = 16*3;
                 foreach (var b in rowBytes)
                 {
                     Console.ForegroundColor = colorCb(np);
