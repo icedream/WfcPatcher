@@ -153,7 +153,7 @@ namespace WfcPatcher
             }
 
             var decDataUnmodified = (byte[]) decData.Clone();
-            if (ReplaceInData(decData, 0x00, true))
+            if (ReplaceInData(decData, true))
             {
                 if (compressed)
                 {
@@ -165,7 +165,7 @@ namespace WfcPatcher
                     {
                         // new ARM is actually bigger, redo without the additional nullterm replacement
                         decData = decDataUnmodified;
-                        ReplaceInData(decData, 0x00, false);
+                        ReplaceInData(decData, false);
                         data = blz.BLZ_Encode(decData, 0);
                         newCompressedSize = (uint) data.Length;
                     }
@@ -417,8 +417,7 @@ namespace WfcPatcher
             return data;
         }
 
-        private static bool ReplaceInData(byte[] data, byte paddingByte = 0x00,
-            bool writeAdditionalBytePostString = false)
+        private static bool ReplaceInData(byte[] data, bool deleteOldTerminator = false)
         {
             bool replacedData;
 
@@ -527,7 +526,7 @@ namespace WfcPatcher
             }
 
             // Replace strings
-            replacedData = ReplaceString(data, _replaceDictionary);
+            replacedData = ReplaceString(data, _replaceDictionary, deleteOldTerminator);
 
             return replacedData;
         }
@@ -602,7 +601,7 @@ namespace WfcPatcher
             return repDict;
         }
 
-        private static bool ReplaceString(byte[] data, Dictionary<string, string> replacements)
+        private static bool ReplaceString(byte[] data, Dictionary<string, string> replacements, bool deleteOldTerminator = false)
         {
             bool replaced = false;
 
@@ -668,13 +667,16 @@ namespace WfcPatcher
 
                     var replacementBytes = originalBytes;
 
-                    // Alright, this might require some explaination.
-                    // This is putting a byte in the location that previously held the NULL terminator at the end of the string.
-                    // We can just place anything in there without affecting the program. Now, the actual *reason* we're putting
-                    // a byte in here is to reduce the chance of the recompressed binary becoming smaller than the original one.
-                    // We want it to remain the exact same size. Now, of course, this is not always going to happen, but this
-                    // should improve the chance significantly.
-                    replacementBytes[originalBytes.Length - encCharSize] = 0x7f;
+                    if (deleteOldTerminator)
+                    {
+                        // Alright, this might require some explaination.
+                        // This is putting a byte in the location that previously held the NULL terminator at the end of the string.
+                        // We can just place anything in there without affecting the program. Now, the actual *reason* we're putting
+                        // a byte in here is to reduce the chance of the recompressed binary becoming smaller than the original one.
+                        // We want it to remain the exact same size. Now, of course, this is not always going to happen, but this
+                        // should improve the chance significantly.
+                        replacementBytes[originalBytes.Length - encCharSize] = 0x7f;
+                    }
 
                     // Now we do the actual replacement
                     enc.GetBytes(replacementString)
