@@ -18,21 +18,21 @@ namespace WfcPatcher
 
             for (int i = 0; i < self.Length; i++)
             {
-                if (!IsMatch(self, i, candidate))
+                if (candidate.Length > (self.Length - i))
+                    continue;
+
+                bool match = true;
+                for (int j = 0; match && j < candidate.Length; j++)
+                    if (self[i + j] != candidate[j])
+                        match = false;
+
+                if (!match)
                     continue;
 
                 list.Add(i);
             }
 
             return list.Count == 0 ? Empty : list.ToArray();
-        }
-
-        private static bool IsMatch(byte[] array, int position, byte[] candidate)
-        {
-            if (candidate.Length > (array.Length - position))
-                return false;
-
-            return !candidate.Where((t, i) => array[position + i] != t).Any();
         }
 
         private static bool IsEmptyLocate(byte[] array, byte[] candidate)
