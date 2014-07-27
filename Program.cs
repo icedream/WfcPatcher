@@ -638,9 +638,13 @@ namespace WfcPatcher
         private static Dictionary<string, string> CompileReplaceDictionary()
         {
             var repDict = new Dictionary<string, string>();
-            var queries = Settings.Default.PatchSubstrings;
 
-            foreach (var q in queries)
+            if (Settings.Default.ApplyNoSSL)
+            {
+                repDict.Add("https://", "http://");
+            }
+
+            foreach (var q in Settings.Default.PatchSubstrings)
             {
                 if (q.Length < 1)
                 {

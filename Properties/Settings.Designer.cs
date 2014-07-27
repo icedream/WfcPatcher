@@ -23,12 +23,15 @@ namespace WfcPatcher.Properties {
             }
         }
         
-        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("wifi.wfc.kthx.at")]
         public string PatchServer {
             get {
                 return ((string)(this["PatchServer"]));
+            }
+            set {
+                this["PatchServer"] = value;
             }
         }
         
@@ -54,6 +57,18 @@ namespace WfcPatcher.Properties {
             }
             set {
                 this["PatchSubstrings"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool ApplyNoSSL {
+            get {
+                return ((bool)(this["ApplyNoSSL"]));
+            }
+            set {
+                this["ApplyNoSSL"] = value;
             }
         }
     }

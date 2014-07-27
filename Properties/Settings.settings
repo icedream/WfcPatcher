@@ -2,7 +2,7 @@
 <SettingsFile xmlns="http://schemas.microsoft.com/VisualStudio/2004/01/settings" CurrentProfile="(Default)" GeneratedClassNamespace="WfcPatcher.Properties" GeneratedClassName="Settings">
   <Profiles />
   <Settings>
-    <Setting Name="PatchServer" Type="System.String" Scope="Application">
+    <Setting Name="PatchServer" Type="System.String" Scope="User">
       <Value Profile="(Default)">wifi.wfc.kthx.at</Value>
     </Setting>
     <Setting Name="PatchSubstrings" Type="System.Collections.Specialized.StringCollection" Scope="User">
@@ -20,6 +20,9 @@
   &lt;string&gt;|message|DreamWFC ID|Wi-Fi ID&lt;/string&gt;
   &lt;string&gt;|message|Wi-Fi  user|Wi-Fi user&lt;/string&gt;
 &lt;/ArrayOfString&gt;</Value>
+    </Setting>
+    <Setting Name="ApplyNoSSL" Type="System.Boolean" Scope="User">
+      <Value Profile="(Default)">False</Value>
     </Setting>
   </Settings>
 </SettingsFile>
