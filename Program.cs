@@ -108,7 +108,7 @@ namespace WfcPatcher
                 {
                     nds.Position = pos;
                     data = new byte[len];
-                    nds.Read(data, 0, (int)len);
+                    nds.Read(data, 0, (int) len);
                 }
 
                 // decompress size info: http://www.crackerscrap.com/docs/dsromstructure.html
@@ -407,7 +407,7 @@ namespace WfcPatcher
                 }
 
                 newOverlaySize = data.Length;
-                diff = (int)overlaySize - newOverlaySize;
+                diff = (int) overlaySize - newOverlaySize;
                 diff = Math.Max(0, diff);
 
                 lock (nds)
@@ -446,7 +446,8 @@ namespace WfcPatcher
                 padding[0] = p;
                 for (var j = 1; j < diff; j += j)
                 {
-                    Debug.WriteLine("-> Array.Copy({0}, {1}, {2}, {3}, {4})", padding, 0, padding, j, Math.Min(diff - j, j));
+                    Debug.WriteLine("-> Array.Copy({0}, {1}, {2}, {3}, {4})", padding, 0, padding, j,
+                        Math.Min(diff - j, j));
                     Array.Copy(padding, 0, padding, j, Math.Min(diff - j, j));
                 }
                 return padding;
