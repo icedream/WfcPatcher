@@ -33,7 +33,7 @@ namespace WfcPatcher
         {
             var fileInfo = new FileInfo(filename);
             var newFilename = Path.Combine(fileInfo.Directory.FullName,
-                string.Format("{0} (DreamWfc).{1}", Path.GetFileNameWithoutExtension(fileInfo.Name),
+                string.Format("{0} (DreamWfc){1}", Path.GetFileNameWithoutExtension(fileInfo.Name),
                     fileInfo.Extension));
 
             using (var nds = new MemoryStream())
