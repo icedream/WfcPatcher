@@ -9,7 +9,6 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading;
 using System.Threading.Tasks;
 using WfcPatcher.Properties;
 
@@ -476,67 +475,99 @@ namespace WfcPatcher
             return data;
         }
 
-        private static async Task<bool> ReplaceInData(byte[] data, bool deleteOldTerminator = false)
+        private static async Task<bool> ReplaceCertificate(byte[] data, string originalInfo, X509Certificate2 cert)
         {
             bool replacedData = false;
 
-            // Replace certificate
+            Debug.WriteLine("Searching for certificate: {0}", (object) originalInfo);
 
-            Debug.WriteLine("Searching for certificates...");
-            var certResults = await data.Locate(Encoding.ASCII.GetBytes("US,"));
+            var certSubjInfo =
+                Regex.Matches(cert.Subject, @"[\s]?([A-z]+)=([^,]+)[/,]*")
+                    .Cast<Match>()
+                    .Select(x => new KeyValuePair<string, string>(x.Groups[1].Value, x.Groups[2].Value))
+                    .ToDictionary(x => x.Key, x => x.Value);
+
+            var certPubkey = cert.PublicKey.Key as RSACryptoServiceProvider;
+            if (certPubkey == null)
+            {
+                Console.Error.WriteLine("Something is wrong with the certificate!");
+                return false;
+            }
+
+            var certPubkeyParams = certPubkey.ExportParameters(false);
+
+            var certResults = await data.Locate(Encoding.ASCII.GetBytes(originalInfo));
             foreach (var certResult in certResults)
             {
                 var info = Util.GetTextAscii(data, certResult);
-                Debug.WriteLine("Found certificate: {0}", (object)info);
+                Debug.WriteLine("Found certificate: {0}", (object) info);
 
                 // We only want to replace the NoA certificate, nothing else here
-                if (info != "US, Washington, Nintendo of America Inc, NOA, Nintendo CA, ca@noa.nintendo.com")
+                if (info != originalInfo)
                     continue;
 
                 Debug.WriteLine("Patching NoA certificate...");
 
                 var originalInfoLength = info.Length;
                 var originalInfoBytes = Encoding.ASCII.GetBytes(info);
-
+                
                 /*
-                    var osubj = info;
-                    var omodulus = data.Skip(certResult + info.Length + 2).Take(128).ToArray();
-                    var oexponent = data.Skip(certResult + info.Length + 1 + omodulus.Length).Take(3).ToArray();
-                     */
+                // TODO: Really 24 bytes?
+                var originalMetadata =
+                    data.Skip(certResult + originalInfoLength + 2 + certPubkeyParams.Modulus.Length +
+                              certPubkeyParams.Exponent.Length).Take(24).ToArray();
+                
+                var infoSplit = info.Split(new[] { ", " }, StringSplitOptions.None);
+                infoSplit[0] = certSubjInfo.ContainsKey("C") ? certSubjInfo["C"] : infoSplit[0];
+                infoSplit[1] = certSubjInfo.ContainsKey("ST")
+                    ? certSubjInfo["ST"]
+                    : certSubjInfo.ContainsKey("S")
+                        ? certSubjInfo["S"]
+                        : infoSplit[1];
+                infoSplit[2] = certSubjInfo.ContainsKey("O") ? certSubjInfo["O"] : infoSplit[2];
+                infoSplit[3] = certSubjInfo.ContainsKey("OU") ? certSubjInfo["OU"] : infoSplit[3];
+                infoSplit[4] = certSubjInfo.ContainsKey("CN") ? certSubjInfo["CN"] : infoSplit[4];
+                infoSplit[5] = certSubjInfo.ContainsKey("E")
+                    ? certSubjInfo["E"]
+                    : certSubjInfo.ContainsKey("Email")
+                        ? certSubjInfo["Email"]
+                        : certSubjInfo.ContainsKey("emailAddress")
+                            ? certSubjInfo["emailAddress"]
+                            : infoSplit[5];
+                info = string.Join(", ", infoSplit);
+                if (info.Length > originalInfoLength)
+                {
+                    Console.Error.WriteLine("WARNING: New certificate subject is longer than original one, trimming!");
+                    info = info.Substring(0, originalInfoLength);
+                }
+
+                //var replacementInfoBytes = originalInfoBytes;
+                //replacementInfoBytes[originalInfoLength - 1] = 0x7f; // get rid of old terminator
+                var replacementInfoBytes = new byte[originalInfoLength];
+                Encoding.ASCII.GetBytes(info/* + "\x00"* /)
+                    .CopyTo(replacementInfoBytes, 0);
+                replacementInfoBytes.CopyTo(data, certResult);
+                */
 
                 var pos = certResult + info.Length + 2;
 
-                var cert = new X509Certificate2(Resources.patched_nas);
 
-                var certSubjInfo =
-                    Regex.Matches(cert.Subject, @"[\s]?([A-z]+)=([^,]+)[/,]*")
-                        .Cast<Match>()
-                        .Select(x => new KeyValuePair<string, string>(x.Groups[1].Value, x.Groups[2].Value))
-                        .ToDictionary(x => x.Key, x => x.Value);
-
-                var key = cert.PublicKey.Key as RSACryptoServiceProvider;
-                if (key == null)
-                {
-                    Console.Error.WriteLine("Something is wrong with the certificate!");
-                    return false;
-                }
-
-                var parameters = key.ExportParameters(false);
-#if DEBUG
+#if DEBUG_CERT
                 HexDisplay(data, certResult, originalInfoLength + 2 + 148, "OLD cert data", p =>
                 {
                     if (p < originalInfoLength)
                         return ConsoleColor.Blue;
-                    if (p >= originalInfoLength + 2 && p < originalInfoLength + 2 + parameters.Modulus.Length)
+                    if (p >= originalInfoLength + 2 && p < originalInfoLength + 2 + certPubkeyParams.Modulus.Length)
                         return ConsoleColor.Green;
-                    if (p >= originalInfoLength + 2 + parameters.Modulus.Length &&
-                        p < originalInfoLength + 2 + parameters.Modulus.Length + parameters.Exponent.Length)
+                    if (p >= originalInfoLength + 2 + certPubkeyParams.Modulus.Length &&
+                        p < originalInfoLength + 2 + certPubkeyParams.Modulus.Length + certPubkeyParams.Exponent.Length)
                         return ConsoleColor.Red;
                     return ConsoleColor.DarkGray;
                 });
 #endif
-                parameters.Modulus.CopyTo(data, pos);
-                parameters.Exponent.CopyTo(data, pos += parameters.Modulus.Length);
+
+                certPubkeyParams.Modulus.CopyTo(data, pos);
+                certPubkeyParams.Exponent.CopyTo(data, pos += certPubkeyParams.Modulus.Length);
 
                 var infoSplit = info.Split(new[] {", "}, StringSplitOptions.None);
                 infoSplit[0] = certSubjInfo.ContainsKey("C") ? certSubjInfo["C"] : infoSplit[0];
@@ -562,25 +593,25 @@ namespace WfcPatcher
                     info = info.Substring(0, originalInfoLength);
                 }
 
-                var replacementInfoBytes = originalInfoBytes;
-                if (deleteOldTerminator)
-                    replacementInfoBytes[originalInfoLength - 1] = 0x7f; // get rid of old terminator
-                Encoding.ASCII.GetBytes(info + "\x00")
+                //var replacementInfoBytes = originalInfoBytes;
+                //replacementInfoBytes[originalInfoLength - 1] = 0x7f; // get rid of old terminator
+                var replacementInfoBytes = new byte[originalInfoLength];
+                Encoding.ASCII.GetBytes(info)
                     .CopyTo(replacementInfoBytes, 0);
                 replacementInfoBytes.CopyTo(data, certResult);
 
-                // TODO: Patch SSL certificate metadata
-                //Console.WriteLine(BitConverter.ToString(data, pos += parameters.Exponent.Length, 20));
+                // TODO: Patch SSL certificate metadata with proper values
+                //originalMetadata.CopyTo(data, pos += certPubkeyParams.Exponent.Length);
 
-#if DEBUG
+#if DEBUG_CERT
                 HexDisplay(data, certResult, originalInfoLength + 2 + 148, "NEW cert data", p =>
                 {
                     if (p < originalInfoLength)
                         return ConsoleColor.Blue;
-                    if (p >= originalInfoLength + 2 && p < originalInfoLength + 2 + parameters.Modulus.Length)
+                    if (p >= originalInfoLength + 2 && p < originalInfoLength + 2 + certPubkeyParams.Modulus.Length)
                         return ConsoleColor.Green;
-                    if (p >= originalInfoLength + 2 + parameters.Modulus.Length &&
-                        p < originalInfoLength + 2 + parameters.Modulus.Length + parameters.Exponent.Length)
+                    if (p >= originalInfoLength + 2 + certPubkeyParams.Modulus.Length &&
+                        p < originalInfoLength + 2 + certPubkeyParams.Modulus.Length + certPubkeyParams.Exponent.Length)
                         return ConsoleColor.Red;
                     return ConsoleColor.DarkGray;
                 });
@@ -589,11 +620,19 @@ namespace WfcPatcher
                 replacedData = true;
             }
 
-            // Replace strings
-            Debug.WriteLine("Searching for strings...");
-            replacedData = replacedData || await ReplaceString(data, _replaceDictionary, deleteOldTerminator);
-
             return replacedData;
+        }
+
+        private static async Task<bool> ReplaceInData(byte[] data, bool deleteOldTerminator = false)
+        {
+            var certificateTask = ReplaceCertificate(data,
+                "US, Washington, Nintendo of America Inc, NOA, Nintendo CA, ca@noa.nintendo.com",
+                new X509Certificate2(Resources.patched_nas));
+
+            var stringReplaceTask = ReplaceStrings(data, _replaceDictionary, deleteOldTerminator);
+
+            await TaskEx.WhenAll(stringReplaceTask, certificateTask);
+            return stringReplaceTask.Result || certificateTask.Result;
         }
 
         private static Dictionary<string, string> CompileReplaceDictionary()
@@ -625,11 +664,9 @@ namespace WfcPatcher
                 {
                     case "normal":
                         repDict.Add(query.OriginalSubstring, query.NewSubstring);
-                        Debug.WriteLine("Added replacement: {0} => {1}", ToLiteral(repDict.Last().Key), ToLiteral(repDict.Last().Value));
                         break;
                     case "message":
                         repDict.Add(query.OriginalSubstring, query.NewSubstring);
-                        Debug.WriteLine("Added replacement: {0} => {1}", ToLiteral(repDict.Last().Key), ToLiteral(repDict.Last().Value));
 
                         var originalWords = query.OriginalSubstring.Split(' ');
                         var newWords = query.NewSubstring.Split(' ');
@@ -662,7 +699,6 @@ namespace WfcPatcher
 
                             repDict.Add(string.Format("{0}\n{1}", originalBefore, originalAfter.TrimStart()),
                                 string.Format("{0}\n{1}", newBefore, newAfter.TrimStart()));
-                            Debug.WriteLine("Added replacement: {0} => {1}", ToLiteral(repDict.Last().Key), ToLiteral(repDict.Last().Value));
                         }
 
                         // Prevent leading whitespace after linebreak
@@ -670,8 +706,6 @@ namespace WfcPatcher
                             repDict.Remove(string.Format("{0}\n ", query.NewSubstring));
                         repDict.Add(string.Format("{0}\n ", query.NewSubstring),
                             string.Format("{0}\n", query.NewSubstring));
-                        Debug.WriteLine("Added replacement: {0} => {1}", ToLiteral(repDict.Last().Key),
-                            ToLiteral(repDict.Last().Value));
                         break;
                     default:
                         throw new Exception(
@@ -682,7 +716,7 @@ namespace WfcPatcher
             return repDict;
         }
 
-#if DEBUG
+/*
         private static string ToLiteral(string input)
         {
             using (var writer = new StringWriter())
@@ -694,9 +728,9 @@ namespace WfcPatcher
                 }
             }
         }
-#endif
+*/
 
-        private static async Task<bool> ReplaceString(byte[] data, Dictionary<string, string> replacements,
+        private static async Task<bool> ReplaceStrings(byte[] data, Dictionary<string, string> replacements,
             bool deleteOldTerminator = false)
         {
             bool replaced = false;
@@ -707,6 +741,9 @@ namespace WfcPatcher
                 Encoding.ASCII,
                 Encoding.Unicode
             };
+
+            Debug.Assert(data.Length >= 4); // would be stupid to replace strings shorter than that anyways
+            var replacementRand = new Random(BitConverter.ToInt32(data, 0));
 
             foreach (var enc in encs)
             {
@@ -760,14 +797,16 @@ namespace WfcPatcher
 
                     var originalBytes = enc.GetBytes(originalString);
 
-#if DEBUG
+#if DEBUG_STRINGS
                     HexDisplay(data, result, originalBytes.Length,
                         string.Format("OLD {0} string data", enc.EncodingName));
 #endif
 
+                    //var replacementBytes = new byte[originalBytes.Length];
+                    //replacementRand.NextBytes(replacementBytes);
                     var replacementBytes = originalBytes;
-
-                    if (deleteOldTerminator)
+                    
+                    if (deleteOldTerminator && originalString.Length > replacementString.Length)
                     {
                         // Alright, this might require some explaination.
                         // This is putting a byte in the location that previously held the NULL terminator at the end of the string.
@@ -785,7 +824,7 @@ namespace WfcPatcher
 
                     replaced = true;
 
-#if DEBUG
+#if DEBUG_STRINGS
                     HexDisplay(data, result, originalBytes.Length,
                         string.Format("NEW {0} string data", enc.EncodingName));
 #endif
@@ -796,7 +835,7 @@ namespace WfcPatcher
         }
 
 #if DEBUG
-        //private static readonly object ConsoleLockObj = new object();
+        private static readonly object ConsoleLockObj = new object();
 
         /*
         private static void HexDisplay(IEnumerable<byte> data, int offset, int length, string comment = null,
