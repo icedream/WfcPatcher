@@ -12,6 +12,7 @@
   &lt;string&gt;|normal|www.nintendowifi.com|wfc.kthx.at&lt;/string&gt;
   &lt;string&gt;|normal|nintendowifi.net|wifi.wfc.kthx.at&lt;/string&gt;
   &lt;string&gt;|normal|nintendowifi.com|wfc.kthx.at&lt;/string&gt;
+  &lt;string&gt;|message|Nintendo Wi-Fi Connection service|the DreamWFC service&lt;/string&gt;
   &lt;string&gt;|message|Nintendo Wi-Fi Connection|the DreamWFC servers&lt;/string&gt;
   &lt;string&gt;|message|Nintendo WFC|DreamWFC&lt;/string&gt;
   &lt;string&gt;|message|Nintendo Wi-Fi|DreamWFC&lt;/string&gt;

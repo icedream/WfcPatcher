@@ -40,6 +40,7 @@ namespace WfcPatcher.Properties {
   <string>|normal|www.nintendowifi.com|wfc.kthx.at</string>
   <string>|normal|nintendowifi.net|wifi.wfc.kthx.at</string>
   <string>|normal|nintendowifi.com|wfc.kthx.at</string>
+  <string>|message|Nintendo Wi-Fi Connection service|the DreamWFC service</string>
   <string>|message|Nintendo Wi-Fi Connection|the DreamWFC servers</string>
   <string>|message|Nintendo WFC|DreamWFC</string>
   <string>|message|Nintendo Wi-Fi|DreamWFC</string>
