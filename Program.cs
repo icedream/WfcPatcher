@@ -551,6 +551,8 @@ namespace WfcPatcher
 
             foreach (var enc in encs)
             {
+                var encCharSize = Equals(enc, Encoding.Unicode) ? 2 : 1;
+
                 foreach (var oresult in replacements.Keys
                     .Select(enc.GetBytes)
                     .SelectMany(data.Locate)
@@ -566,9 +568,9 @@ namespace WfcPatcher
                         var c = cs.First();
                         if (!IsPrintable(c))
                             break;
-                        result -= Equals(enc, Encoding.Unicode) ? 2 : 1;
+                        result -= encCharSize;
                     }
-                    result += Equals(enc, Encoding.Unicode) ? 2 : 1; // actual beginning of string
+                    result += encCharSize; // actual beginning of string
 
                     // Decode string
                     string originalString;
@@ -607,7 +609,7 @@ namespace WfcPatcher
                     // a byte in here is to reduce the chance of the recompressed binary becoming smaller than the original one.
                     // We want it to remain the exact same size. Now, of course, this is not always going to happen, but this
                     // should improve the chance significantly.
-                    replacementBytes[originalBytes.Length - 1] = 0x7f;
+                    replacementBytes[originalBytes.Length - encCharSize] = 0x7f;
 
                     // Now we do the actual replacement
                     enc.GetBytes(replacementString)
