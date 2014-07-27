@@ -2,6 +2,7 @@
 
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace WfcPatcher
 {
@@ -9,30 +10,33 @@ namespace WfcPatcher
     {
         private static readonly int[] Empty = new int[0];
 
-        public static int[] Locate(this byte[] self, byte[] candidate)
+        public static async Task<int[]> Locate(this byte[] self, byte[] candidate)
         {
-            if (IsEmptyLocate(self, candidate))
-                return Empty;
-
-            var list = new List<int>();
-
-            for (int i = 0; i < self.Length; i++)
+            return await TaskEx.Run(() =>
             {
-                if (candidate.Length > (self.Length - i))
-                    continue;
+                if (IsEmptyLocate(self, candidate))
+                    return Empty;
 
-                bool match = true;
-                for (int j = 0; match && j < candidate.Length; j++)
-                    if (self[i + j] != candidate[j])
-                        match = false;
+                var list = new List<int>();
 
-                if (!match)
-                    continue;
+                for (int i = 0; i < self.Length; i++)
+                {
+                    if (candidate.Length > (self.Length - i))
+                        continue;
 
-                list.Add(i);
-            }
+                    bool match = true;
+                    for (int j = 0; match && j < candidate.Length; j++)
+                        if (self[i + j] != candidate[j])
+                            match = false;
 
-            return list.Count == 0 ? Empty : list.ToArray();
+                    if (!match)
+                        continue;
+
+                    list.Add(i);
+                }
+
+                return list.Count == 0 ? Empty : list.ToArray();
+            });
         }
 
         private static bool IsEmptyLocate(byte[] array, byte[] candidate)

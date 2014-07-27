@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace WfcPatcher {
 	class blz {
@@ -154,6 +155,12 @@ namespace WfcPatcher {
 		}
 
 		/*----------------------------------------------------------------------------*/
+
+	    public async Task<byte[]> BLZ_Decode_Async(byte[] pak_buffer)
+	    {
+	        return await TaskEx.Run(() => BLZ_Decode(pak_buffer));
+	    }
+
 		public byte[] BLZ_Decode( byte[] pak_buffer ) {
 			fileWasNotCompressed = false;
 			byte[] raw_buffer;
@@ -256,7 +263,13 @@ namespace WfcPatcher {
 		}
 
 		//*----------------------------------------------------------------------------
-		public byte[] BLZ_Encode( byte[] raw_buffer, uint mode ) {
+
+	    public async Task<byte[]> BLZ_Encode_Async(byte[] raw_buffer, uint mode)
+	    {
+	        return await TaskEx.Run(() => BLZ_Encode(raw_buffer, mode));
+	    }
+
+        public byte[] BLZ_Encode( byte[] raw_buffer, uint mode ) {
 			byte[] pak_buffer, new_buffer;
 			uint   raw_len, pak_len, new_len;
 
