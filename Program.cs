@@ -15,12 +15,11 @@ namespace WfcPatcher
 {
     internal class Program
     {
-        private static byte[] originalCertificate = {};
-        private static byte[] patchedCertificate = {};
+        private static Dictionary<string, string> _replaceDictionary;
 
         private static void Main(string[] args)
         {
-            patchedCertificate = new X509Certificate(Resources.patched_nas).GetPublicKey();
+            _replaceDictionary = CompileReplaceDictionary();
 
             foreach (var s in args)
             {
@@ -403,7 +402,7 @@ namespace WfcPatcher
         private static bool ReplaceInData(byte[] data, byte paddingByte = 0x00,
             bool writeAdditionalBytePostString = false)
         {
-            bool replacedData = false;
+            bool replacedData;
 
             // Replace certificate
 
@@ -508,34 +507,79 @@ namespace WfcPatcher
             }
 
             // Replace strings
-            replacedData = ReplaceString(data, new Dictionary<string, string>
-            {
-                // There must be a more intelligent way than that
-                { "call \u0031\u002D\u0038\u0030\u0030\u002D\u0038\u0039\u0035\u002D\u0031\u0036\u0037\u0032", "visit #dreamwfc on Rizon" },
-                { "call\n\u0031\u002D\u0038\u0030\u0030\u002D\u0038\u0039\u0035\u002D\u0031\u0036\u0037\u0032", "visit #dreamwfc on Rizon" },
-                { "visit #dreamwfc on Rizon in the USA and Canada", "visit #dreamwfc on Rizon" },
-                { "visit #dreamwfc on Rizon\nin the USA and Canada, ", "visit #dreamwfc on Rizon,\n" },
-                { "visit #dreamwfc on Rizon in\nthe USA and Canada, ", "visit #dreamwfc on Rizon,\n" },
-                { "visit #dreamwfc on Rizon in the\nUSA and Canada, ", "visit #dreamwfc on Rizon,\n" },
-                { "visit #dreamwfc on Rizon in the USA\nand Canada, ", "visit #dreamwfc on Rizon,\n" },
-                { "visit #dreamwfc on Rizon in the USA and\nCanada, ", "visit #dreamwfc on Rizon,\n" },
-                { "visit #dreamwfc on Rizon in the USA and Canada,\n", "visit #dreamwfc on Rizon,\n" },
-                { "www.nintendowifi.com", "wfc.kthx.at" },
-                { "nintendowifi.net", "wifi.wfc.kthx.at" },
-                { "nintendowifi.com", "wfc.kthx.at" },
-                { "Nintendo Wi-Fi Connection", "the DreamWFC servers" },
-                { "Nintendo\nWi-Fi Connection", "the\nDreamWFC servers" },
-                { "Nintendo Wi-Fi\nConnection", "the DreamWFC\nservers" },
-                { "Nintendo WFC", "DreamWFC" },
-                { "Nintendo\nWFC", "DreamWFC" },
-                { "Nintendo Wi-Fi", "DreamWFC" },
-                { "Nintendo\nWi-Fi", "DreamWFC" },
-                { "DreamWFC data", "Wi-Fi data" },
-                { "DreamWFC ID", "Wi-Fi ID" },
-                { "Wi-Fi  user", "Wi-Fi user" },
-            });
+            replacedData = ReplaceString(data, _replaceDictionary);
 
             return replacedData;
+        }
+
+        private static Dictionary<string, string> CompileReplaceDictionary()
+        {
+            var repDict = new Dictionary<string, string>();
+            var queries = Settings.Default.PatchSubstrings;
+
+            foreach (var q in queries)
+            {
+                if (q.Length < 1)
+                {
+                    throw new Exception(
+                        "Invalid substring patch line found: Missing first character (acting as delimiter)");
+                }
+
+                var delimiter = q[0];
+                var qsplit = q.Split(delimiter);
+                if (qsplit.Length != 4) // delimiter type delimiter originalString delimiter patchString
+                    throw new Exception(
+                        "Invalid substring patch line found: Bad syntax. Syntax is \"delimiter type originalstring type newstring\". Example: \"|type|original|patched\".");
+                var query = new
+                {
+                    Type = qsplit[1],
+                    OriginalSubstring = qsplit[2],
+                    NewSubstring = qsplit[3]
+                };
+
+                switch (query.Type)
+                {
+                    case "normal":
+                        repDict.Add(query.OriginalSubstring, query.NewSubstring);
+                        break;
+                    case "message":
+                        repDict.Add(query.OriginalSubstring, query.NewSubstring);
+
+                        var originalWords = query.OriginalSubstring.Split(' ');
+                        var newWords = query.NewSubstring.Split(' ');
+                        for (var i = 1; i < Math.Max(originalWords.Length, newWords.Length); i++)
+                        {
+                            var originalBefore = string.Join(" ", originalWords.Take(Math.Min(i, originalWords.Length)));
+                            var originalAfterSkip = Math.Min(i, originalWords.Length);
+                            var originalAfter = string.Join(" ",
+                                originalWords.Skip(originalAfterSkip).Take(originalWords.Length - originalAfterSkip));
+
+                            var newBefore = string.Empty;
+                            var newAfter = string.Empty;
+                            var j = 0;
+                            do
+                            {
+                                j++;
+                                var tempNewBefore = string.Join(" ", newWords.Take(Math.Min(j, newWords.Length)));
+                                if (tempNewBefore.Length > originalBefore.Length)
+                                    break;
+                                newBefore = tempNewBefore;
+                                var newAfterSkip = Math.Min(j, newWords.Length);
+                                newAfter = string.Join(" ",
+                                    newWords.Skip(newAfterSkip).Take(newWords.Length - newAfterSkip));
+                            } while (j < newWords.Length);
+
+                            repDict.Add(string.Format("{0}\n{1}", originalBefore, originalAfter),
+                                string.Format("{0}\n{1}", newBefore, newAfter));
+                        }
+                        break;
+                    default:
+                        throw new Exception(
+                            "Invalid substring patch line found: Invalid type. Allowed types are \"message\" (will take line breaks into account) and \"normal\" (plain replace).");
+                }
+            }
+
+            return repDict;
         }
 
         private static bool ReplaceString(byte[] data, Dictionary<string, string> replacements)
