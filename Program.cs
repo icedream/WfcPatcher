@@ -858,19 +858,22 @@ namespace WfcPatcher
         private static void HexDisplay(IEnumerable<byte> data, int offset, int length, string comment = null,
             Func<int, ConsoleColor> colorCb = null)
         {
-            var bytes = data.Skip(offset).Take(length).ToArray();
-
-            comment = string.Format("{2} at 0x{0:X8} ({1} bytes)", offset, length, comment ?? "Raw data");
-
-            Debug.WriteLine(comment);
-
-            for (var i = 0; i < bytes.Length; i += 16)
+            lock (ConsoleLockObj)
             {
-                var rowBytes = bytes.Skip(i).Take(Math.Min(16, bytes.Length - i)).ToArray();
-                Debug.WriteLine("\t{0}{1}",
-                    BitConverter.ToString(rowBytes).Replace("-", " ").PadRight(3*16),
-                    new string(rowBytes.Select(b => (char) b).Select(c => IsPrintable(c) ? c : '.').ToArray())
-                    );
+                var bytes = data.Skip(offset).Take(length).ToArray();
+
+                comment = string.Format("{2} at 0x{0:X8} ({1} bytes)", offset, length, comment ?? "Raw data");
+
+                Debug.WriteLine(comment);
+
+                for (var i = 0; i < bytes.Length; i += 16)
+                {
+                    var rowBytes = bytes.Skip(i).Take(Math.Min(16, bytes.Length - i)).ToArray();
+                    Debug.WriteLine("\t{0}{1}",
+                        BitConverter.ToString(rowBytes).Replace("-", " ").PadRight(3*16),
+                        new string(rowBytes.Select(b => (char) b).Select(c => IsPrintable(c) ? c : '.').ToArray())
+                        );
+                }
             }
         }
 #endif
