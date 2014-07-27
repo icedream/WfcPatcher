@@ -21,7 +21,12 @@ namespace WfcPatcher
         {
             _replaceDictionary = CompileReplaceDictionary();
 
+/*#if DEBUG
+            foreach (var a in args)
+                PatchFile(a).Wait();
+#else*/
             TaskEx.WhenAll(args.Select(PatchFile)).Wait();
+/*#endif*/
         }
 
         private static async Task PatchFile(string filename)
@@ -40,10 +45,11 @@ namespace WfcPatcher
 
                 // A bit of info about how DS ROMs are structured: http://dsibrew.org/wiki/DSi_Cartridge_Header
 
-                /* ARM patching */
+                /* ARM code/overlay patching */
 
                 // Header
                 uint arm9offset, arm9entry, arm9load, arm9size, arm7offset, arm7entry, arm7load, arm7size;
+                uint arm9overlayoff, arm9overlaylen, arm7overlayoff, arm7overlaylen;
                 lock (nds)
                 {
                     nds.Position = 0x20;
@@ -55,18 +61,7 @@ namespace WfcPatcher
                     arm7entry = nds.ReadUInt32();
                     arm7load = nds.ReadUInt32();
                     arm7size = nds.ReadUInt32();
-                }
 
-                // Actual patching
-                await PatchArm9(nds, arm9offset, arm9size);
-                await PatchArm7(nds, arm7offset, arm7size);
-
-                /* Overlay patching */
-
-                // Header
-                uint arm9overlayoff, arm9overlaylen, arm7overlayoff, arm7overlaylen;
-                lock (nds)
-                {
                     nds.Position = 0x50;
                     arm9overlayoff = nds.ReadUInt32();
                     arm9overlaylen = nds.ReadUInt32();
@@ -75,8 +70,20 @@ namespace WfcPatcher
                 }
 
                 // Actual patching
-                await PatchOverlay(nds, arm9overlayoff, arm9overlaylen);
-                await PatchOverlay(nds, arm7overlayoff, arm7overlaylen);
+#if DEBUG
+                PatchArm9(nds, arm9offset, arm9size).Wait();
+                PatchArm7(nds, arm7offset, arm7size).Wait();
+                PatchOverlay(nds, arm9overlayoff, arm9overlaylen).Wait();
+                PatchOverlay(nds, arm7overlayoff, arm7overlaylen).Wait();
+#else
+                await TaskEx.WhenAll(new[]
+                {
+                    PatchArm9(nds, arm9offset, arm9size),
+                    PatchArm7(nds, arm7offset, arm7size),
+                    PatchOverlay(nds, arm9overlayoff, arm9overlaylen),
+                    PatchOverlay(nds, arm7overlayoff, arm7overlaylen)
+                });
+#endif
 
                 // Now save patched ROM to disk
                 using (var fs = File.Open(newFilename, FileMode.OpenOrCreate))
@@ -90,165 +97,171 @@ namespace WfcPatcher
 
         private static async Task PatchArm9(Stream nds, uint pos, uint len)
         {
-            Debug.WriteLine("Patching ARM9");
-
-            byte[] data;
-            lock (nds)
+            try
             {
-                nds.Position = pos;
-                data = new byte[len];
-                nds.Read(data, 0, (int)len);
-            }
+                Debug.WriteLine("Patching ARM9");
 
-            // decompress size info: http://www.crackerscrap.com/docs/dsromstructure.html
-            // TODO: Is there a better way to figure out if an ARM9 is compressed?
-
-            uint compressedSize, additionalCompressedSize, decompressedSize;
-            lock (nds)
-            {
-                nds.Position -= 8;
-                compressedSize = nds.ReadUInt24();
-                nds.ReadByte();
-                additionalCompressedSize = nds.ReadUInt32();
-                decompressedSize = additionalCompressedSize + len;
-            }
-
-            bool compressed = false;
-            byte[] decData = data;
-
-#if DEBUG
-            Debug.WriteLine("ARM9 old dec size: 0x{0:X6}", decompressedSize);
-            Debug.WriteLine("ARM9 old cmp size: 0x{0:X6}", compressedSize);
-            Debug.WriteLine("ARM9 old filesize: 0x{0:X6}", len);
-            Debug.WriteLine("ARM9 old diff:     0x{0:X6}", additionalCompressedSize);
-#endif
-
-            var blz = new blz();
-            // if this condition isn't true then it can't be blz-compressed so don't even try
-            if (data.Length == compressedSize + 0x4000 || data.Length == compressedSize + 0x4004)
-            {
-                try
-                {
-                    blz.arm9 = 1;
-                    byte[] maybeDecData = await blz.BLZ_Decode_Async(data);
-
-                    if (maybeDecData.Length == decompressedSize)
-                    {
-                        compressed = true;
-                        decData = maybeDecData;
-                    }
-                }
-                catch (Exception)
-                {
-                    compressed = false;
-                }
-            }
-
-            var decDataUnmodified = (byte[]) decData.Clone();
-            if (await ReplaceInData(decData, true))
-            {
-                if (compressed)
-                {
-                    data = await blz.BLZ_Encode_Async(decData, 0);
-
-                    var newCompressedSize = (uint) data.Length;
-                    if (newCompressedSize > len)
-                    {
-                        // new ARM is actually bigger, redo without the additional nullterm replacement
-                        decData = decDataUnmodified;
-                        ReplaceInData(decData, false);
-                        data = blz.BLZ_Encode(decData, 0);
-                        newCompressedSize = (uint) data.Length;
-                    }
-
-                    if (newCompressedSize != len)
-                    {
-                        // new ARM is (still) different, attempt to find the metadata in the ARM9 secure area and replace that
-                        byte[] newCmpSizeBytes = BitConverter.GetBytes(newCompressedSize);
-                        for (int i = 0; i < 0x4000; i += 4)
-                        {
-                            uint maybeSize = BitConverter.ToUInt32(data, i);
-                            if (maybeSize == len + 0x02000000)
-                            {
-                                data[i + 0] = newCmpSizeBytes[0];
-                                data[i + 1] = newCmpSizeBytes[1];
-                                data[i + 2] = newCmpSizeBytes[2];
-                                data[i + 3] = (byte) (newCmpSizeBytes[3] + 0x02);
-                                break;
-                            }
-                        }
-                    }
-#if DEBUG
-                    var newDecompressedSize = (uint) decData.Length;
-                    uint newAdditionalCompressedSize = newDecompressedSize - newCompressedSize;
-                    Debug.WriteLine("ARM9 new dec size: 0x{0:X6}", newDecompressedSize);
-                    Debug.WriteLine("ARM9 new cmp size: 0x{0:X6}", newCompressedSize);
-                    Debug.WriteLine("ARM9 new diff:     0x{0:X6}", newAdditionalCompressedSize);
-#endif
-                }
-                else
-                {
-                    data = decData;
-                }
-
+                byte[] data;
                 lock (nds)
                 {
                     nds.Position = pos;
-                    nds.Write(data, 0, data.Length);
+                    data = new byte[len];
+                    nds.Read(data, 0, (int)len);
                 }
 
-                int newSize = data.Length;
-                int diff = (int) len - newSize;
+                // decompress size info: http://www.crackerscrap.com/docs/dsromstructure.html
+                // TODO: Is there a better way to figure out if an ARM9 is compressed?
 
-                // copy back footer
-                if (diff > 0)
+                uint compressedSize, additionalCompressedSize, decompressedSize;
+                lock (nds)
                 {
-                    var footer = new List<byte>();
+                    nds.Position -= 8;
+                    compressedSize = nds.ReadUInt24();
+                    nds.ReadByte();
+                    additionalCompressedSize = nds.ReadUInt32();
+                    decompressedSize = additionalCompressedSize + len;
+                }
+
+                bool compressed = false;
+                byte[] decData = data;
+
+#if DEBUG
+                Debug.WriteLine("ARM9 old dec size: 0x{0:X6}", decompressedSize);
+                Debug.WriteLine("ARM9 old cmp size: 0x{0:X6}", compressedSize);
+                Debug.WriteLine("ARM9 old filesize: 0x{0:X6}", len);
+                Debug.WriteLine("ARM9 old diff:     0x{0:X6}", additionalCompressedSize);
+#endif
+
+                var blz = new blz();
+                // if this condition isn't true then it can't be blz-compressed so don't even try
+                if (data.Length == compressedSize + 0x4000 || data.Length == compressedSize + 0x4004)
+                {
+                    try
+                    {
+                        blz.arm9 = 1;
+                        byte[] maybeDecData = await blz.BLZ_Decode_Async(data);
+
+                        if (maybeDecData.Length == decompressedSize)
+                        {
+                            compressed = true;
+                            decData = maybeDecData;
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        compressed = false;
+                    }
+                }
+
+                var decDataUnmodified = (byte[]) decData.Clone();
+                if (await ReplaceInData(decData, true))
+                {
+                    if (compressed)
+                    {
+                        data = await blz.BLZ_Encode_Async(decData, 0);
+
+                        var newCompressedSize = (uint) data.Length;
+                        if (newCompressedSize > len)
+                        {
+                            // new ARM is actually bigger, redo without the additional nullterm replacement
+                            decData = decDataUnmodified;
+                            ReplaceInData(decData, false);
+                            data = blz.BLZ_Encode(decData, 0);
+                            newCompressedSize = (uint) data.Length;
+                        }
+
+                        if (newCompressedSize != len)
+                        {
+                            // new ARM is (still) different, attempt to find the metadata in the ARM9 secure area and replace that
+                            byte[] newCmpSizeBytes = BitConverter.GetBytes(newCompressedSize);
+                            for (int i = 0; i < 0x4000; i += 4)
+                            {
+                                uint maybeSize = BitConverter.ToUInt32(data, i);
+                                if (maybeSize == len + 0x02000000)
+                                {
+                                    data[i + 0] = newCmpSizeBytes[0];
+                                    data[i + 1] = newCmpSizeBytes[1];
+                                    data[i + 2] = newCmpSizeBytes[2];
+                                    data[i + 3] = (byte) (newCmpSizeBytes[3] + 0x02);
+                                    break;
+                                }
+                            }
+                        }
+#if DEBUG
+                        var newDecompressedSize = (uint) decData.Length;
+                        uint newAdditionalCompressedSize = newDecompressedSize - newCompressedSize;
+                        Debug.WriteLine("ARM9 new dec size: 0x{0:X6}", newDecompressedSize);
+                        Debug.WriteLine("ARM9 new cmp size: 0x{0:X6}", newCompressedSize);
+                        Debug.WriteLine("ARM9 new diff:     0x{0:X6}", newAdditionalCompressedSize);
+#endif
+                    }
+                    else
+                    {
+                        data = decData;
+                    }
+
                     lock (nds)
                     {
-                        nds.Position = pos + len;
-                        if (nds.PeekUInt32() == 0xDEC00621)
+                        nds.Position = pos;
+                        nds.Write(data, 0, data.Length);
+                    }
+
+                    int newSize = data.Length;
+                    int diff = (int) len - newSize;
+
+                    // copy back footer
+                    if (diff > 0)
+                    {
+                        var footer = new List<byte>();
+                        var padding = await GeneratePadding(diff, 0xff);
+                        lock (nds)
                         {
-                            for (int j = 0; j < 12; ++j)
+                            nds.Position = pos + len;
+                            if (nds.PeekUInt32() == 0xDEC00621)
                             {
-                                footer.Add((byte) nds.ReadByte());
+                                for (int j = 0; j < 12; ++j)
+                                {
+                                    footer.Add((byte) nds.ReadByte());
+                                }
+
+                                nds.Position = pos + newSize;
+                                nds.Write(footer.ToArray(), 0, footer.Count);
                             }
 
-                            nds.Position = pos + newSize;
-                            nds.Write(footer.ToArray(), 0, footer.Count);
-                        }
-
-                        // padding
-                        for (int j = 0; j < diff; ++j)
-                        {
-                            nds.WriteByte(0xFF);
+                            // padding
+                            nds.Write(padding, 0, diff);
                         }
                     }
-                }
 
-                // write new size
-                byte[] newSizeBytes = BitConverter.GetBytes(newSize);
-                lock (nds)
-                {
-                    nds.Position = 0x2C;
-                    nds.Write(newSizeBytes, 0, 4);
-                }
+                    // write new size
+                    byte[] newSizeBytes = BitConverter.GetBytes(newSize);
+                    lock (nds)
+                    {
+                        nds.Position = 0x2C;
+                        nds.Write(newSizeBytes, 0, 4);
+                    }
 
-                // recalculate checksums
-                lock (nds)
-                {
-                    nds.Position = pos;
-                    ushort secureChecksum = new Crc16().ComputeChecksum(nds, 0x4000, 0xFFFF);
-                    nds.Position = 0x6C;
-                    nds.Write(BitConverter.GetBytes(secureChecksum), 0, 2);
-                }
+                    // recalculate checksums
+                    lock (nds)
+                    {
+                        nds.Position = pos;
+                        ushort secureChecksum = new Crc16().ComputeChecksum(nds, 0x4000, 0xFFFF);
+                        nds.Position = 0x6C;
+                        nds.Write(BitConverter.GetBytes(secureChecksum), 0, 2);
+                    }
 
-                lock (nds)
-                {
-                    nds.Position = 0;
-                    ushort headerChecksum = new Crc16().ComputeChecksum(nds, 0x15E, 0xFFFF);
-                    nds.Write(BitConverter.GetBytes(headerChecksum), 0, 2);
+                    lock (nds)
+                    {
+                        nds.Position = 0;
+                        ushort headerChecksum = new Crc16().ComputeChecksum(nds, 0x15E, 0xFFFF);
+                        nds.Write(BitConverter.GetBytes(headerChecksum), 0, 2);
+                    }
                 }
+            }
+            catch (Exception e)
+            {
+                Debug.WriteLine(e);
+                Debugger.Break();
             }
         }
 
@@ -393,6 +406,7 @@ namespace WfcPatcher
 
                 newOverlaySize = data.Length;
                 diff = (int)overlaySize - newOverlaySize;
+                diff = Math.Max(0, diff);
 
                 lock (nds)
                 {
@@ -419,14 +433,19 @@ namespace WfcPatcher
             }
         }
 
-        private static async Task<byte[]> GeneratePadding(int diff, int p)
+        private static async Task<byte[]> GeneratePadding(long diff, byte p)
         {
+            Debug.WriteLine("genpad({0}, {1})", diff, p);
+            if (diff <= 0)
+                return new byte[0];
             return await TaskEx.Run(() =>
             {
                 var padding = new byte[diff];
+                padding[0] = p;
                 for (var j = 1; j < diff; j += j)
                 {
-                    Array.Copy(padding, 0, padding, j, j);
+                    Debug.WriteLine("-> Array.Copy({0}, {1}, {2}, {3}, {4})", padding, 0, padding, j, Math.Min(diff - j, j));
+                    Array.Copy(padding, 0, padding, j, Math.Min(diff - j, j));
                 }
                 return padding;
             });
@@ -465,7 +484,7 @@ namespace WfcPatcher
             foreach (var certResult in certResults)
             {
                 var info = Util.GetTextAscii(data, certResult);
-                Debug.WriteLine("Found certificate: {0}", info);
+                Debug.WriteLine("Found certificate: {0}", (object)info);
 
                 // We only want to replace the NoA certificate, nothing else here
                 if (info != "US, Washington, Nintendo of America Inc, NOA, Nintendo CA, ca@noa.nintendo.com")
@@ -474,6 +493,7 @@ namespace WfcPatcher
                 Debug.WriteLine("Patching NoA certificate...");
 
                 var originalInfoLength = info.Length;
+                var originalInfoBytes = Encoding.ASCII.GetBytes(info);
 
                 /*
                     var osubj = info;
@@ -538,8 +558,13 @@ namespace WfcPatcher
                     Console.Error.WriteLine("WARNING: New certificate subject is longer than original one, trimming!");
                     info = info.Substring(0, originalInfoLength);
                 }
-                Encoding.ASCII.GetBytes(info + "\x00" + new string('\x00', originalInfoLength - info.Length))
-                    .CopyTo(data, certResult);
+
+                var replacementInfoBytes = originalInfoBytes;
+                if (deleteOldTerminator)
+                    replacementInfoBytes[originalInfoLength - 1] = 0x7f; // get rid of old terminator
+                Encoding.ASCII.GetBytes(info + "\x00")
+                    .CopyTo(replacementInfoBytes, 0);
+                replacementInfoBytes.CopyTo(data, certResult);
 
                 // TODO: Patch SSL certificate metadata
                 //Console.WriteLine(BitConverter.ToString(data, pos += parameters.Exponent.Length, 20));
@@ -652,7 +677,7 @@ namespace WfcPatcher
             foreach (var enc in encs)
             {
                 var encCharSize = Equals(enc, Encoding.Unicode) ? 2 : 1;
-                Debug.WriteLine("Searching for {0} strings...", enc.EncodingName);
+                Debug.WriteLine("Searching for " + enc.EncodingName + " strings");
 
                 var results = new List<int>();
                 foreach (var b in replacements.Keys.Select(enc.GetBytes))
