@@ -8,7 +8,7 @@
     <Setting Name="PatchSubstrings" Type="System.Collections.Specialized.StringCollection" Scope="User">
       <Value Profile="(Default)">&lt;?xml version="1.0" encoding="utf-16"?&gt;
 &lt;ArrayOfString xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"&gt;
-  &lt;string&gt;|message|call 1-800-895-1672 in the USA and Canada|visit #dreamwfc on Rizon&lt;/string&gt;
+  &lt;string&gt;|message|call 1-800-895-1672 in the USA and Canada, or|visit #dreamwfc on Rizon or&lt;/string&gt;
   &lt;string&gt;|normal|www.nintendowifi.com|wfc.kthx.at&lt;/string&gt;
   &lt;string&gt;|normal|nintendowifi.net|wifi.wfc.kthx.at&lt;/string&gt;
   &lt;string&gt;|normal|nintendowifi.com|wfc.kthx.at&lt;/string&gt;

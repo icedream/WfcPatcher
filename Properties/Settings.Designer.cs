@@ -36,7 +36,7 @@ namespace WfcPatcher.Properties {
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute(@"<?xml version=""1.0"" encoding=""utf-16""?>
 <ArrayOfString xmlns:xsi=""http://www.w3.org/2001/XMLSchema-instance"" xmlns:xsd=""http://www.w3.org/2001/XMLSchema"">
-  <string>|message|call 1-800-895-1672 in the USA and Canada|visit #dreamwfc on Rizon</string>
+  <string>|message|call 1-800-895-1672 in the USA and Canada, or|visit #dreamwfc on Rizon or</string>
   <string>|normal|www.nintendowifi.com|wfc.kthx.at</string>
   <string>|normal|nintendowifi.net|wifi.wfc.kthx.at</string>
   <string>|normal|nintendowifi.com|wfc.kthx.at</string>

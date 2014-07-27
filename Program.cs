@@ -622,9 +622,11 @@ namespace WfcPatcher
                 {
                     case "normal":
                         repDict.Add(query.OriginalSubstring, query.NewSubstring);
+                        Debug.WriteLine("Added replacement: {0} => {1}", ToLiteral(repDict.Last().Key), ToLiteral(repDict.Last().Value));
                         break;
                     case "message":
                         repDict.Add(query.OriginalSubstring, query.NewSubstring);
+                        Debug.WriteLine("Added replacement: {0} => {1}", ToLiteral(repDict.Last().Key), ToLiteral(repDict.Last().Value));
 
                         var originalWords = query.OriginalSubstring.Split(' ');
                         var newWords = query.NewSubstring.Split(' ');
@@ -642,7 +644,7 @@ namespace WfcPatcher
                             {
                                 j++;
                                 var tempNewBefore = string.Join(" ", newWords.Take(Math.Min(j, newWords.Length)));
-                                if (tempNewBefore.Length > originalBefore.Length)
+                                if (tempNewBefore.Length - 2 /* rough guessing */ > originalBefore.Length)
                                     break;
                                 newBefore = tempNewBefore;
                                 var newAfterSkip = Math.Min(j, newWords.Length);
@@ -650,9 +652,23 @@ namespace WfcPatcher
                                     newWords.Skip(newAfterSkip).Take(newWords.Length - newAfterSkip));
                             } while (j < newWords.Length);
 
-                            repDict.Add(string.Format("{0}\n{1}", originalBefore, originalAfter),
-                                string.Format("{0}\n{1}", newBefore, newAfter));
+                            if (newBefore == string.Empty && newAfter == string.Empty)
+                            {
+                                newAfter = query.NewSubstring;
+                            }
+
+                            repDict.Add(string.Format("{0}\n{1}", originalBefore, originalAfter.TrimStart()),
+                                string.Format("{0}\n{1}", newBefore, newAfter.TrimStart()));
+                            Debug.WriteLine("Added replacement: {0} => {1}", ToLiteral(repDict.Last().Key), ToLiteral(repDict.Last().Value));
                         }
+
+                        // Prevent leading whitespace after linebreak
+                        if (repDict.ContainsKey(string.Format("{0}\n ", query.NewSubstring)))
+                            repDict.Remove(string.Format("{0}\n ", query.NewSubstring));
+                        repDict.Add(string.Format("{0}\n ", query.NewSubstring),
+                            string.Format("{0}\n", query.NewSubstring));
+                        Debug.WriteLine("Added replacement: {0} => {1}", ToLiteral(repDict.Last().Key),
+                            ToLiteral(repDict.Last().Value));
                         break;
                     default:
                         throw new Exception(
@@ -663,7 +679,22 @@ namespace WfcPatcher
             return repDict;
         }
 
-        private static async Task<bool> ReplaceString(byte[] data, Dictionary<string, string> replacements, bool deleteOldTerminator = false)
+#if DEBUG
+        private static string ToLiteral(string input)
+        {
+            using (var writer = new StringWriter())
+            {
+                using (var provider = CodeDomProvider.CreateProvider("CSharp"))
+                {
+                    provider.GenerateCodeFromExpression(new CodePrimitiveExpression(input), writer, null);
+                    return writer.ToString();
+                }
+            }
+        }
+#endif
+
+        private static async Task<bool> ReplaceString(byte[] data, Dictionary<string, string> replacements,
+            bool deleteOldTerminator = false)
         {
             bool replaced = false;
 
